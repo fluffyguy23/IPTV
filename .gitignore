@@ -1,0 +1,48 @@
+# ── Secrets & local configuration ───────────────────────────────
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+keystore.properties
+signing.properties
+local.properties
+secrets/
+*.mobileprovision
+*.provisionprofile
+
+# ── Build artifacts ─────────────────────────────────────────────
+# macOS app
+IPTVXtremePlayer/build/
+IPTVXtremePlayer/dist/
+IPTVXtremePlayer/.build/
+*.app
+*.dmg
+# Android
+IPTVXtremeAndroid/dist/
+**/build/
+.gradle/
+.kotlin/
+.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# ── IDE / OS / tool noise ───────────────────────────────────────
+.DS_Store
+.idea/
+*.iml
+.vscode/
+*.swp
+*.log
+xcuserdata/
+DerivedData/
+.swiftpm/
+.claude/
