@@ -59,6 +59,11 @@ final class VODDetailViewController: VScrollController {
         updateFavIcon()
         favButton.target = self; favButton.action = #selector(toggleFavorite)
         actionViews.append(favButton)
+        // "Download This Video Offline"
+        let download = DownloadPill()
+        download.profileID = coordinator.session.profile.id
+        download.item = coordinator.session.makeMovieItem(movie, ext: info?.containerExtension)
+        actionViews.append(download)
         let actions = NSStackView(views: actionViews)
         actions.spacing = 12
         actions.alignment = .centerY

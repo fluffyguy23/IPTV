@@ -3,7 +3,9 @@ import AppKit
 /// Full playback surface with an auto-hiding control bar. Reused both embedded
 /// (Live TV) and inside a dedicated window (movies / series).
 final class PlayerViewController: NSViewController {
-    private let session: Session
+    /// Where resume points / history go. Nil only if no profile is known.
+    private let userData: UserData?
+    private let profileID: UUID?
     private var item: PlaybackItem
     private let embedded: Bool
     private let player = VLCPlayer()
@@ -33,6 +35,7 @@ final class PlayerViewController: NSViewController {
     private lazy var settingsButton = IconButton(symbol: "gearshape.fill", pointSize: 15)
     private lazy var fullscreenButton = IconButton(symbol: "arrow.up.left.and.arrow.down.right", pointSize: 14)
     private lazy var closeButton = IconButton(symbol: "xmark", pointSize: 14)
+    private let downloadPill = DownloadPill()
     private let liveTag = makeLabel("● LIVE", font: Theme.Font.bold(11), color: Theme.negative)
 
     private var userScrubbing = false
@@ -41,8 +44,16 @@ final class PlayerViewController: NSViewController {
     private var hideWorkItem: DispatchWorkItem?
     private var aspectRatio: String?
 
-    init(session: Session, item: PlaybackItem, embedded: Bool, navigator: EpisodeNavigator? = nil) {
-        self.session = session
+    convenience init(session: Session, item: PlaybackItem, embedded: Bool, navigator: EpisodeNavigator? = nil) {
+        self.init(userData: session.userData, profileID: session.profile.id, item: item,
+                  embedded: embedded, navigator: navigator)
+    }
+
+    /// Designated init — needs no live session, so offline downloads can play
+    /// while disconnected.
+    init(userData: UserData?, profileID: UUID?, item: PlaybackItem, embedded: Bool, navigator: EpisodeNavigator? = nil) {
+        self.userData = userData
+        self.profileID = profileID
         self.item = item
         self.embedded = embedded
         self.navigator = navigator   // must be set before loadView builds the control bar
@@ -121,8 +132,19 @@ final class PlayerViewController: NSViewController {
         closeButton.isHidden = embedded
         topBar.addSubview(closeButton)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
+        // "Download This Video Offline" — only for movies/episodes (the embedded
+        // Live TV player never shows it, so the title keeps its full width there).
+        if !item.isLive {
+            downloadPill.profileID = profileID
+            downloadPill.item = item
+            topBar.addSubview(downloadPill)
+            NSLayoutConstraint.activate([
+                downloadPill.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -14),
+                downloadPill.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: downloadPill.leadingAnchor, constant: -12)
+            ])
+        }
         NSLayoutConstraint.activate([
-            // Leading inset clears the window traffic-lights when not embedded.
             titleLabel.leadingAnchor.constraint(equalTo: topBar.leadingAnchor, constant: embedded ? 20 : 82),
             titleLabel.topAnchor.constraint(equalTo: topBar.topAnchor, constant: 16),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -12),
@@ -220,7 +242,7 @@ final class PlayerViewController: NSViewController {
         player.load(url: item.url, options: item.mediaOptions)
         player.volume = 100
         player.play()
-        session.userData.recordPlay(item.ref)
+        userData?.recordPlay(item.ref)
         revealControls()
     }
 
@@ -230,6 +252,7 @@ final class PlayerViewController: NSViewController {
         player.stop()
         item = newItem
         titleLabel.stringValue = newItem.title
+        if downloadPill.superview != nil { downloadPill.item = newItem }
         slider.isHidden = newItem.isLive
         liveTag.isHidden = !newItem.isLive
         duration.isHidden = newItem.isLive
@@ -306,7 +329,7 @@ final class PlayerViewController: NSViewController {
         lastSaved = now
         let pos = Double(player.timeMs) / 1000.0
         let dur = Double(player.lengthMs) / 1000.0
-        if pos > 0 { session.userData.updateProgress(item.ref, position: pos, duration: dur) }
+        if pos > 0 { userData?.updateProgress(item.ref, position: pos, duration: dur) }
     }
 
     private func handleEnded() {

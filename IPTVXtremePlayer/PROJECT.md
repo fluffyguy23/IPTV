@@ -3,7 +3,7 @@
 _Complete, living record of the app: what it is, how it's built, what works, what's
 been fixed, and what's open. Last updated: 2026-10-10._
 
-**Current release:** v1.1 (build 2) · bundle id `com.iptvxtreme.player` · Intel x86_64 · macOS 12+ (built for Ventura 13).
+**Current release:** v1.2 (build 3) · bundle id `com.iptvxtreme.player` · Intel x86_64 · macOS 12+ (built for Ventura 13).
 **Status:** Built, packaged, installed, and connected to a live provider. Compiles clean (0 warnings).
 
 ---
@@ -110,6 +110,10 @@ new Movies/Series rails; favorites grouped by type; history with **right‑click
 
 **Global search** across channels/movies/series. Image + metadata disk caching.
 
+**Offline downloads (v1.2):** "Download This Video Offline" pill in the player top bar
+and on movie detail; Downloads sidebar section (also opens from the connection screen
+without signing in); downloaded titles play from disk automatically.
+
 ---
 
 ## 5. Xtream integration & live test results
@@ -198,6 +202,38 @@ Six requested changes implemented:
 | 8 | Low | Launch did a synchronous main‑thread Keychain read ×2 | Read once, off main; password‑carrying connect |
 
 ---
+
+## 8b. v1.2 — Offline downloads (macOS only)
+
+Design (`Core/DownloadManager.swift`, `UI/DownloadsViewController.swift`, `UI/Common/DownloadPill.swift`):
+- `URLSession` download tasks, delegate on the main queue, **one at a time** (queue) because
+  IPTV plans often allow a single connection. No new dependencies.
+- Storage: `Application Support/IPTVXtremePlayer/Downloads/Files/` (0600, excluded from
+  Time Machine) + `Downloads/index.json` (records: MediaRef, profile id, status, sizes, error).
+- **Credentials never hit disk**: stream URLs and URLSession resume data (both embed the
+  username/password) are kept in memory only. After a restart, Retry rebuilds the URL
+  from the connected session of the same profile.
+- A file is moved into `Files/` only after validation (2xx, not text/html/json, ≥64 KB,
+  size == Content-Length); until then it is never listed as playable.
+- Launch reconciliation: queued/downloading → failed "Interrupted"; completed-but-missing
+  → failed; unowned files deleted.
+- Disk guard: refuses to start with < 1 GB free; cancels if the remaining bytes would leave
+  < 512 MB free. Quit warns while a download is active.
+- `PlaybackItem.preferringOfflineCopy()` makes movie/episode items play the local file when
+  one exists; live items never change. `PlayerViewController` now takes `UserData?`
+  (not a full `Session`) so offline titles play while disconnected.
+- Provider limits: Xtream VOD/episodes are plain HTTP files without DRM, downloaded with the
+  user's own subscription; live channels (endless streams) and `.m3u8` titles are rejected.
+  A download occupies one provider connection.
+
+Testing (harness built from the app sources, isolated `CFFIXED_USER_HOME`, public sample
+videos + a local throttled server — no subscription credentials used): **41/41 checks pass**
+— full download with progress, size match, duplicate prevention (done / in progress),
+404, HTML error page, 403, unreachable host, live/HLS rejection, network drop → retry
+resumes from offset, cancel → retry resumes, queueing, force-quit mid-download →
+"Interrupted" after restart, persistence across two restarts, delete removes file+record,
+index contains no URLs. The downloaded file decoded fully in libVLC with networking denied
+by `sandbox-exec`. Not yet done: on-screen GUI click-through and a real-provider download.
 
 ## 9. Verification status
 

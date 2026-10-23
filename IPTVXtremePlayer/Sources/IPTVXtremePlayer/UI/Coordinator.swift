@@ -1,7 +1,7 @@
 import AppKit
 
 enum Section: Int, CaseIterable {
-    case home, liveTV, movies, series, favorites, recent, settings
+    case home, liveTV, movies, series, favorites, recent, downloads, settings
 
     var title: String {
         switch self {
@@ -11,6 +11,7 @@ enum Section: Int, CaseIterable {
         case .series: return "Series"
         case .favorites: return "Favorites"
         case .recent: return "Recently Watched"
+        case .downloads: return "Downloads"
         case .settings: return "Settings"
         }
     }
@@ -23,6 +24,7 @@ enum Section: Int, CaseIterable {
         case .series: return "rectangle.stack.fill"
         case .favorites: return "star.fill"
         case .recent: return "clock.fill"
+        case .downloads: return "arrow.down.circle.fill"
         case .settings: return "gearshape.fill"
         }
     }

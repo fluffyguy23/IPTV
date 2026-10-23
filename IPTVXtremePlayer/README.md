@@ -10,6 +10,26 @@ credentials, and a self‑contained app bundle.
 
 ---
 
+## What's new in 1.2 — Offline downloads
+
+- **Download This Video Offline**: a button in the player's top bar (and on
+  movie pages) saves the current movie or episode to this Mac, showing
+  *Downloading NN%*, *Available Offline* or *Download Failed — Retry*.
+- **Downloads** section in the sidebar: artwork, status, progress, size,
+  Play / Cancel / Retry / Delete, plus disk space used and free.
+- **Works with no internet**: the connection screen has an *Offline Downloads*
+  button, so saved titles play even when the app can't sign in.
+- Titles you've downloaded automatically play from the local copy everywhere
+  (Continue Watching, favorites, episode lists — marked "✓ Available offline").
+- Reliable: one download at a time (IPTV plans often allow one connection),
+  resumable after network drops or Cancel, validated before it's marked
+  complete (HTTP status, error pages, truncated files), low-disk-space guard,
+  and a warning before quitting mid-download. Interrupted downloads are shown
+  as failed with Retry — never as playable.
+- Files live in `~/Library/Application Support/IPTVXtremePlayer/Downloads/`
+  (excluded from Time Machine). Only movies and series episodes can be
+  downloaded; live channels and HLS-only titles can't.
+
 ## What's new in 1.1
 
 - **Responsive layout** — the window now sizes to your display's usable area and

@@ -243,6 +243,7 @@ final class RootViewController: NSViewController, AppCoordinator {
         case .series: return MediaGridViewController(coordinator: self, kind: .series)
         case .favorites: return FavoritesViewController(coordinator: self)
         case .recent: return RecentViewController(coordinator: self)
+        case .downloads: return DownloadsViewController()
         case .settings: return SettingsViewController(coordinator: self)
         }
     }

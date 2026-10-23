@@ -117,6 +117,9 @@ final class SeriesDetailViewController: VScrollController {
                               font: Theme.Font.medium(14), color: Theme.textPrimary, lines: 1)
         var sub = ""
         if let d = ep.durationSecs, d > 0 { sub = formatDuration(d) }
+        if DownloadManager.shared.localFileURL(for: .episode(ep, series: series)) != nil {
+            sub += sub.isEmpty ? "✓ Available offline" : "  ·  ✓ Available offline"
+        }
         let subtitle = makeLabel(sub, font: Theme.Font.regular(11.5), color: Theme.textTertiary)
         let textStack = NSStackView(views: [title, subtitle])
         textStack.orientation = .vertical; textStack.spacing = 2; textStack.alignment = .leading

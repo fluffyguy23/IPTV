@@ -96,8 +96,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key>           <string>com.iptvxtreme.player</string>
     <key>CFBundleExecutable</key>           <string>IPTVXtremePlayer</string>
     <key>CFBundlePackageType</key>          <string>APPL</string>
-    <key>CFBundleShortVersionString</key>   <string>1.1</string>
-    <key>CFBundleVersion</key>              <string>2</string>
+    <key>CFBundleShortVersionString</key>   <string>1.2</string>
+    <key>CFBundleVersion</key>              <string>3</string>
     <key>LSMinimumSystemVersion</key>       <string>12.0</string>
     <key>NSHighResolutionCapable</key>      <true/>
     <key>LSApplicationCategoryType</key>    <string>public.app-category.entertainment</string>

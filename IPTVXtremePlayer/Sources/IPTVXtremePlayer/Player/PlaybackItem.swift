@@ -9,6 +9,16 @@ struct PlaybackItem {
     let resumeSecs: Double
     let networkCaching: Int
 
+    /// True when this plays from an offline download on disk.
+    var isLocal: Bool { url.isFileURL }
+
+    /// The same item pointed at its completed offline download, if there is one.
+    func preferringOfflineCopy() -> PlaybackItem {
+        guard !isLive, let file = DownloadManager.shared.localFileURL(for: ref) else { return self }
+        return PlaybackItem(ref: ref, url: file, title: title, isLive: false,
+                            resumeSecs: resumeSecs, networkCaching: 600)
+    }
+
     var mediaOptions: [String] {
         var opts = [":network-caching=\(networkCaching)"]
         if isLive {
@@ -32,7 +42,7 @@ extension Session {
         guard let url = client.movieURL(streamID: s.streamID, ext: container) else { return nil }
         let ref = MediaRef.movie(s)
         return PlaybackItem(ref: ref, url: url, title: s.name, isLive: false,
-                            resumeSecs: userData.resumePosition(for: ref), networkCaching: 3000)
+                            resumeSecs: userData.resumePosition(for: ref), networkCaching: 3000).preferringOfflineCopy()
     }
 
     func makeEpisodeItem(_ e: Episode, series: SeriesStream) -> PlaybackItem? {
@@ -41,11 +51,17 @@ extension Session {
         let ref = MediaRef.episode(e, series: series)
         let title = "\(series.name) · S\(e.season)E\(e.episodeNum) \(e.title)"
         return PlaybackItem(ref: ref, url: url, title: title, isLive: false,
-                            resumeSecs: userData.resumePosition(for: ref), networkCaching: 3000)
+                            resumeSecs: userData.resumePosition(for: ref), networkCaching: 3000).preferringOfflineCopy()
     }
 
-    /// Rebuild a playable item from a stored reference (resume / favorites / recents).
+    /// Rebuild a playable item from a stored reference (resume / favorites /
+    /// recents), playing the offline copy when one has been downloaded.
     func makeItem(from ref: MediaRef) -> PlaybackItem? {
+        makeRemoteItem(from: ref)?.preferringOfflineCopy()
+    }
+
+    /// Like makeItem(from:) but always the network stream (used to (re)download).
+    func makeRemoteItem(from ref: MediaRef) -> PlaybackItem? {
         switch ref.kind {
         case .live:
             guard let id = ref.streamID, let url = client.liveURL(streamID: id, format: profile.liveFormat) else { return nil }

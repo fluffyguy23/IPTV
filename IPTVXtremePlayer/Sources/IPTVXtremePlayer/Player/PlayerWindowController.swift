@@ -9,8 +9,15 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     @discardableResult
     static func present(session: Session, item: PlaybackItem,
                         navigator: EpisodeNavigator? = nil) -> PlayerWindowController {
+        present(userData: session.userData, profileID: session.profile.id, item: item, navigator: navigator)
+    }
+
+    /// Present without a live session (offline downloads while disconnected).
+    @discardableResult
+    static func present(userData: UserData?, profileID: UUID?, item: PlaybackItem,
+                        navigator: EpisodeNavigator? = nil) -> PlayerWindowController {
         active?.close()
-        let wc = PlayerWindowController(session: session, item: item, navigator: navigator)
+        let wc = PlayerWindowController(userData: userData, profileID: profileID, item: item, navigator: navigator)
         wc.showWindow(nil)
         wc.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -18,10 +25,11 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
         return wc
     }
 
-    private init(session: Session, item: PlaybackItem, navigator: EpisodeNavigator?) {
+    private init(userData: UserData?, profileID: UUID?, item: PlaybackItem, navigator: EpisodeNavigator?) {
         // Navigator is passed into init so it exists before contentViewController
         // forces the view (and the control bar) to load.
-        playerVC = PlayerViewController(session: session, item: item, embedded: false, navigator: navigator)
+        playerVC = PlayerViewController(userData: userData, profileID: profileID, item: item,
+                                        embedded: false, navigator: navigator)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1000, height: 580),
             // .fullSizeContentView makes the video full-bleed under the transparent

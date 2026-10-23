@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         buildMenu()
+        _ = DownloadManager.shared   // load + reconcile the offline download index
 
         let wc = MainWindowController()
         wc.showWindow(nil)
@@ -23,6 +24,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Warn before quitting mid-download (an interrupted download must be retried).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let active = DownloadManager.shared.records.filter { $0.status == .downloading || $0.status == .queued }
+        guard !active.isEmpty else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "Quit while \(active.count == 1 ? "a download is" : "downloads are") in progress?"
+        alert.informativeText = "Unfinished downloads will stop and can be retried from Downloads later."
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Keep Downloading")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
 
     /// Locate VLC plugins: bundled in the .app's Frameworks/plugins first, then
     /// the system VLC.app installation.

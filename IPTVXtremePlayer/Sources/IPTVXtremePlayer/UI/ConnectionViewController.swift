@@ -68,6 +68,11 @@ final class ConnectionViewController: NSViewController {
         content.addArrangedSubview(tagline)
         content.setCustomSpacing(6, after: brand)
 
+        // Offline Downloads work without signing in (e.g. no internet).
+        let offline = PillButton(title: "Offline Downloads (\(DownloadManager.shared.completedCount))", filled: false)
+        offline.onClick = { DownloadsWindowController.show() }
+        content.addArrangedSubview(offline)
+
         // Saved profiles
         profilesStack.orientation = .vertical
         profilesStack.spacing = 10
