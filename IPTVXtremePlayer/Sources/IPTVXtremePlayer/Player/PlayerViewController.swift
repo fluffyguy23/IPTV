@@ -41,6 +41,32 @@ final class PlayerViewController: NSViewController {
     private var userScrubbing = false
     private var didApplyResume = false
     private var lastSaved: TimeInterval = 0
+
+    // MARK: Recovery state
+    // libVLC reports `.ended` (not `.error`) when an HTTP stream stops early — e.g.
+    // the provider drops the connection and refuses the reconnect (expired VOD
+    // token / connection limit). Treating that as "movie finished" used to close
+    // the player mid-film. We now compare the last good position with the length
+    // and reconnect (resuming in place) unless the title genuinely finished.
+    private static let maxRecoveryAttempts = 5
+    private static let recoveryDelays: [TimeInterval] = [1, 2, 4, 8, 15]
+    /// Last position seen while actually playing (libVLC can reset time at EOF).
+    private var lastGoodTimeMs: Int64 = 0
+    private var knownLengthMs: Int64 = 0
+    private var recoveryAttempts = 0
+    private var recovering = false
+    private var recoveryWork: DispatchWorkItem?
+    /// Position to restore after a reconnect (overrides item.resumeSecs once).
+    private var pendingResumeMs: Int64?
+    /// Where playback stood when the current recovery began (for the stability reset).
+    private var recoveredAtMs: Int64 = 0
+    private var endHandled = false
+    private var lastLoggedState: VLCPlayer.State = .nothing
+    /// Stopped because the view left the screen (window minimized, section switch).
+    private var stoppedByDisappear = false
+    /// Embedded (Live TV) player: ask the host to open a dedicated full-screen window.
+    var onFullscreenRequest: (() -> Void)?
+    private let retryButton = PillButton(title: "Retry")
     private var hideWorkItem: DispatchWorkItem?
     private var aspectRatio: String?
 
@@ -70,13 +96,36 @@ final class PlayerViewController: NSViewController {
     override func viewDidAppear() {
         super.viewDidAppear()
         view.window?.makeFirstResponder(videoView)
-        if player.state == .nothing { start() }
+        if player.state == .nothing {
+            start()
+        } else if stoppedByDisappear {
+            // Came back (e.g. window un-minimized): continue where we were.
+            stoppedByDisappear = false
+            if !item.isLive && lastGoodTimeMs > 0 { pendingResumeMs = lastGoodTimeMs }
+            start()
+        }
     }
 
     override func viewWillDisappear() {
         super.viewWillDisappear()
         saveProgress(force: true)
+        cancelRecovery()
+        stoppedByDisappear = true
         player.stop()
+    }
+
+    /// Stop without tearing down (e.g. handing the stream to the full-screen window,
+    /// so a single-connection plan isn't used twice).
+    func suspendPlayback() {
+        cancelRecovery()
+        saveProgress(force: true)
+        player.stop()
+    }
+
+    /// Restart the current item after suspendPlayback().
+    func resumePlayback() {
+        guard view.window != nil else { stoppedByDisappear = true; return }
+        start()
     }
 
     // MARK: Build
@@ -109,6 +158,14 @@ final class PlayerViewController: NSViewController {
             errorLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             errorLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             errorLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 420)
+        ])
+        retryButton.isHidden = true
+        retryButton.translatesAutoresizingMaskIntoConstraints = false
+        retryButton.onClick = { [weak self] in self?.retryAfterFailure() }
+        view.addSubview(retryButton)
+        NSLayoutConstraint.activate([
+            retryButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            retryButton.topAnchor.constraint(equalTo: errorLabel.bottomAnchor, constant: 16)
         ])
 
         buildTopBar()
@@ -235,8 +292,13 @@ final class PlayerViewController: NSViewController {
 
     private func start() {
         didApplyResume = false
+        endHandled = false
+        stoppedByDisappear = false
+        knownLengthMs = 0
+        if pendingResumeMs == nil { lastGoodTimeMs = 0 }
         setBuffering(true)
         errorLabel.isHidden = true
+        retryButton.isHidden = true
         player.attach(to: videoView)
         player.onTick = { [weak self] t, l, state in self?.tick(timeMs: t, lengthMs: l, state: state) }
         player.load(url: item.url, options: item.mediaOptions)
@@ -249,6 +311,9 @@ final class PlayerViewController: NSViewController {
     /// Switch to a new item without tearing down the view (next/prev episode, zapping).
     func replace(with newItem: PlaybackItem) {
         saveProgress(force: true)
+        cancelRecovery()
+        recoveryAttempts = 0
+        pendingResumeMs = nil
         player.stop()
         item = newItem
         titleLabel.stringValue = newItem.title
@@ -263,23 +328,39 @@ final class PlayerViewController: NSViewController {
     }
 
     private func tick(timeMs: Int64, lengthMs: Int64, state: VLCPlayer.State) {
+        if state != lastLoggedState {
+            Log.info("Player state \(lastLoggedState) → \(state) at \(timeMs)ms / \(lengthMs)ms (\(item.isLive ? "live" : "vod"))")
+            lastLoggedState = state
+        }
+        if lengthMs > 0 { knownLengthMs = lengthMs }
         switch state {
         case .buffering, .opening:
             setBuffering(true)
         case .playing:
             setBuffering(false)
             errorLabel.isHidden = true
+            retryButton.isHidden = true
             playPause.setSymbol("pause.fill", pointSize: 20)
             applyResumeIfNeeded(lengthMs: lengthMs)
+            if didApplyResume && timeMs > 0 { lastGoodTimeMs = timeMs }
+            // A recovery that has kept playing for 30s is a success: reset the budget.
+            if recoveryAttempts > 0 && timeMs - recoveredAtMs > 30_000 {
+                Log.info("Playback stable again after reconnect; resetting retry budget")
+                recoveryAttempts = 0
+            }
         case .paused:
             setBuffering(false)
             playPause.setSymbol("play.fill", pointSize: 20)
         case .error:
             setBuffering(false)
-            showError("This stream could not be played. It may be offline, in an unsupported format, or your connection limit may be reached.")
+            recover(reason: "playback error")
         case .ended:
             setBuffering(false)
-            handleEnded()
+            if isGenuineEnd() {
+                handleEnded()
+            } else {
+                recover(reason: "stream ended early")
+            }
         default:
             break
         }
@@ -313,26 +394,109 @@ final class PlayerViewController: NSViewController {
 
     private func applyResumeIfNeeded(lengthMs: Int64) {
         guard !didApplyResume else { return }
+        if item.isLive { didApplyResume = true; return }
         // libVLC often reports .playing before the length is known; wait for a
         // real length so the one-shot resume isn't wasted on a lengthMs == 0 tick.
         guard lengthMs > 0 else { return }
-        if item.resumeSecs > 10 {
+        if let resume = pendingResumeMs {
+            if resume > 1000 { player.seek(toMs: resume) }
+            lastGoodTimeMs = resume
+            pendingResumeMs = nil
+        } else if item.resumeSecs > 10 {
             player.seek(toMs: Int64(item.resumeSecs * 1000))
         }
         didApplyResume = true
     }
 
+    // MARK: End-of-stream & recovery
+
+    /// True only when a movie/episode really reached its end. Live streams never "end".
+    private func isGenuineEnd() -> Bool {
+        if item.isLive { return false }
+        let length = knownLengthMs
+        // Unknown length (rare for VOD): we cannot tell, so trust libVLC.
+        guard length > 0 else { return true }
+        let remaining = length - lastGoodTimeMs
+        return remaining <= max(30_000, length / 50)   // within 30 s or 2 % of the end
+    }
+
+    /// Reconnect after a recoverable failure, resuming at the last good position.
+    /// Bounded: at most `maxRecoveryAttempts` consecutive tries with back-off,
+    /// then a visible error with a Retry button — never a silent close.
+    private func recover(reason: String) {
+        guard !recovering, !endHandled else { return }
+        guard recoveryAttempts < Self.maxRecoveryAttempts else {
+            endHandled = true
+            saveProgress(force: true)
+            Log.error("Playback failed after \(recoveryAttempts) reconnect attempts (\(reason))")
+            showFailure()
+            return
+        }
+        recovering = true
+        recoveryAttempts += 1
+        let resumeMs = item.isLive ? 0 : lastGoodTimeMs
+        recoveredAtMs = resumeMs
+        let delay = Self.recoveryDelays[min(recoveryAttempts - 1, Self.recoveryDelays.count - 1)]
+        Log.warn("Playback interrupted (\(reason)) at \(resumeMs)ms of \(knownLengthMs)ms — reconnecting in \(delay)s (attempt \(recoveryAttempts)/\(Self.maxRecoveryAttempts))")
+        saveProgress(force: true)
+        player.stop()
+        setBuffering(true)
+        showError("Connection interrupted — reconnecting… (\(recoveryAttempts)/\(Self.maxRecoveryAttempts))")
+        retryButton.isHidden = true
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, self.recovering else { return }
+            self.recovering = false
+            self.pendingResumeMs = resumeMs > 0 ? resumeMs : nil
+            // Reload the original URL: providers hand out a fresh (re)direct/token.
+            self.start()
+        }
+        recoveryWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func cancelRecovery() {
+        recoveryWork?.cancel()
+        recoveryWork = nil
+        recovering = false
+    }
+
+    private func showFailure() {
+        setBuffering(false)
+        player.stop()
+        let message = item.isLive
+            ? "This channel stopped and could not be reconnected. It may be offline, or your connection limit may be reached."
+            : "Playback stopped and could not be resumed after \(Self.maxRecoveryAttempts) attempts. Check your internet connection or your provider's connection limit, then press Retry."
+        showError(message)
+        retryButton.isHidden = false
+        setControlsHidden(false)
+    }
+
+    private func retryAfterFailure() {
+        recoveryAttempts = 0
+        endHandled = false
+        retryButton.isHidden = true
+        if !item.isLive && lastGoodTimeMs > 0 { pendingResumeMs = lastGoodTimeMs }
+        start()
+    }
+
     private func saveProgress(force: Bool) {
         guard !item.isLive else { return }
+        // Until a pending resume/seek has been applied, the engine's clock is ~0 and
+        // must not overwrite the saved position.
+        guard didApplyResume else { return }
         let now = Date().timeIntervalSince1970
         if !force && now - lastSaved < 5 { return }
         lastSaved = now
-        let pos = Double(player.timeMs) / 1000.0
-        let dur = Double(player.lengthMs) / 1000.0
+        let t = player.timeMs
+        let pos = Double(t > 0 ? t : lastGoodTimeMs) / 1000.0
+        let dur = Double(player.lengthMs > 0 ? player.lengthMs : knownLengthMs) / 1000.0
         if pos > 0 { userData?.updateProgress(item.ref, position: pos, duration: dur) }
     }
 
     private func handleEnded() {
+        guard !endHandled else { return }   // ticks keep arriving while ended
+        endHandled = true
+        Log.info("Playback finished at \(lastGoodTimeMs)ms of \(knownLengthMs)ms")
         saveProgress(force: true)
         if let nav = navigator, nav.hasNext, let next = nav.next() {
             replace(with: next)
@@ -419,9 +583,15 @@ final class PlayerViewController: NSViewController {
         muteButton.setSymbol(player.isMuted || player.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill", pointSize: 14)
     }
 
-    @objc private func toggleFullscreen() { view.window?.toggleFullScreen(nil) }
+    @objc private func toggleFullscreen() {
+        // The embedded Live TV player hands off to a dedicated full-screen window
+        // (making the whole library window full screen would keep the video small).
+        if embedded, let request = onFullscreenRequest { request(); return }
+        view.window?.toggleFullScreen(nil)
+    }
 
     @objc private func close() {
+        cancelRecovery()
         player.stop()
         onClose?()
     }

@@ -55,7 +55,7 @@ final class SettingsViewController: VScrollController, Refreshable {
 
         // About
         addFullWidth(infoCard(title: "About", rows: [
-            ("Application", "IPTVXtremePlayer 1.2"),
+            ("Application", "IPTVXtremePlayer 1.2.1"),
             ("Platform", "macOS · Intel x86_64")
         ]))
 

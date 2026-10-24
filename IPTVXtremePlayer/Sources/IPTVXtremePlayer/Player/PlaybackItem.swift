@@ -21,6 +21,8 @@ struct PlaybackItem {
 
     var mediaOptions: [String] {
         var opts = [":network-caching=\(networkCaching)"]
+        // Let libVLC transparently re-open dropped HTTP connections (Range resume).
+        if !isLocal { opts.append(":http-reconnect") }
         if isLive {
             opts.append(":live-caching=\(networkCaching)")
             opts.append(":clock-jitter=0")

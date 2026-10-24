@@ -3,7 +3,7 @@
 _Complete, living record of the app: what it is, how it's built, what works, what's
 been fixed, and what's open. Last updated: 2026-10-10._
 
-**Current release:** v1.2 (build 3) · bundle id `com.iptvxtreme.player` · Intel x86_64 · macOS 12+ (built for Ventura 13).
+**Current release:** v1.2.1 (build 4) · bundle id `com.iptvxtreme.player` · Intel x86_64 · macOS 12+ (built for Ventura 13).
 **Status:** Built, packaged, installed, and connected to a live provider. Compiles clean (0 warnings).
 
 ---
@@ -234,6 +234,39 @@ resumes from offset, cancel → retry resumes, queueing, force-quit mid-download
 "Interrupted" after restart, persistence across two restarts, delete removes file+record,
 index contains no URLs. The downloaded file decoded fully in libVLC with networking denied
 by `sandbox-exec`. Not yet done: on-screen GUI click-through and a real-provider download.
+
+## 8c. v1.2.1 — Live TV size + premature player close
+
+**Live TV video tiny (root cause).** `LiveTVViewController` added the ★ `IconButton` to the
+info bar without `translatesAutoresizingMaskIntoConstraints = false`. Its autoresizing
+constraints (x = 0, width = 0) plus `trailing = infoBar.trailing − 20` forced the info bar —
+and so the whole right panel incl. the video — to 20 pt, and pinned the window content width
+(black area in full screen). Evidence: 9 "Unable to simultaneously satisfy constraints"
+entries in the user's unified log. Fix: set the flag; channel list 330 pt preferred
+(priority 490, below window-size 500), min 260 pt. Embedded full screen now hands the
+channel to a full-screen `PlayerWindowController` (embedded player suspended to keep a
+single-connection plan free, resumed on close).
+
+**Movie player closing after minutes (root cause).** libVLC reports `Ended` — not
+`Error` — when an HTTP stream stops early and its reconnect is refused (reproduced: drop
+at 12 s of 94.6 s + 403 on reconnect → `Ended` at 11.98 s). `handleEnded()` closed the window
+on any `Ended`. Fix: `isGenuineEnd()` compares the last good position with the length
+(within max(30 s, 2 %)); otherwise `recover()` reloads the original URL (fresh provider
+redirect/token) and seeks back, max 5 consecutive tries (1/2/4/8/15 s), budget reset after
+30 s stable; then a visible error + Retry (never a silent close). `.error` also recovers;
+live never "ends". `:http-reconnect` added for network items. Progress isn't overwritten
+while a resume is pending. State transitions are logged (no URLs).
+
+Tests (real view controllers in offscreen windows, fake Xtream server with tokenized
+redirects, audio muted): layout 5/5 sizes (860→2560 pt, 0 constraint errors; before: 20 pt
+video, 6 errors); drop+refused reconnect: old build closed at 12 s, fixed build resumed at
+11.4 s and finished normally; uninterrupted movie ends normally; unrecoverable stream → 5
+bounded retries then error + Retry, window kept open; live drop → reconnect; 35-min movie with a drop
+at ~10 min + refused reconnect: recovered in ~13 s and kept playing for 33 min of content
+(the run also survived a 9-min Mac sleep, which consumed the harness time cap at 1973/2100 s);
+the final segment (resumed at 32:30) played to 34:46 and closed as a genuine end. Peak RSS
+of the test process ~35 MB. Still to check by hand: on-screen look of Live TV at your screen
+size and a real-provider movie.
 
 ## 9. Verification status
 

@@ -5,6 +5,8 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     private static var active: PlayerWindowController?
 
     private let playerVC: PlayerViewController
+    /// Called once the window has closed (Live TV resumes its embedded player).
+    var onClosed: (() -> Void)?
 
     @discardableResult
     static func present(session: Session, item: PlaybackItem,
@@ -52,6 +54,9 @@ final class PlayerWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     func windowWillClose(_ notification: Notification) {
+        let closed = onClosed
+        onClosed = nil
+        DispatchQueue.main.async { closed?() }   // after this window's player has stopped
         if PlayerWindowController.active === self { PlayerWindowController.active = nil }
     }
 }

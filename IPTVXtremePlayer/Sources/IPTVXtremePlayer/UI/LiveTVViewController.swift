@@ -101,6 +101,10 @@ final class LiveTVViewController: NSViewController, NSTableViewDataSource, NSTab
         infoBar.translatesAutoresizingMaskIntoConstraints = false
         rightPanel.addSubview(infoBar)
         favButton.target = self; favButton.action = #selector(toggleFavorite)
+        // Must opt out of autoresizing-mask constraints: with the default (fixed
+        // x = 0, width = 0) plus the trailing constraint below, AppKit forced the
+        // whole right panel — video included — to 20 pt wide.
+        favButton.translatesAutoresizingMaskIntoConstraints = false
         let epgStack = NSStackView(views: [channelTitle, epgNow, epgNext])
         epgStack.orientation = .vertical; epgStack.spacing = 3; epgStack.alignment = .leading
         epgStack.translatesAutoresizingMaskIntoConstraints = false
@@ -111,7 +115,11 @@ final class LiveTVViewController: NSViewController, NSTableViewDataSource, NSTab
             leftPanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             leftPanel.topAnchor.constraint(equalTo: view.topAnchor),
             leftPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            leftPanel.widthAnchor.constraint(equalToConstant: 330),
+            // 330pt preferred; the channel list gives way (down to 260pt) on narrow
+            // windows so the video keeps room for its controls.
+            leftPanel.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
+            leftPanel.widthAnchor.constraint(lessThanOrEqualToConstant: 330),
+            { let c = leftPanel.widthAnchor.constraint(equalToConstant: 330); c.priority = NSLayoutConstraint.Priority(490); return c }(),   // below window-size priority (500)
 
             categoryPopup.topAnchor.constraint(equalTo: leftPanel.topAnchor, constant: 16),
             categoryPopup.leadingAnchor.constraint(equalTo: leftPanel.leadingAnchor, constant: 14),
@@ -207,6 +215,7 @@ final class LiveTVViewController: NSViewController, NSTableViewDataSource, NSTab
             vc.replace(with: item)
         } else {
             let vc = PlayerViewController(session: coordinator.session, item: item, embedded: true)
+            vc.onFullscreenRequest = { [weak self] in self?.openFullScreenPlayer() }
             addChild(vc)
             vc.view.translatesAutoresizingMaskIntoConstraints = false
             playerContainer.addSubview(vc.view)
@@ -216,6 +225,17 @@ final class LiveTVViewController: NSViewController, NSTableViewDataSource, NSTab
         channelTitle.stringValue = channel.name
         updateFavIcon()
         loadEPG(for: channel)
+    }
+
+    /// Full screen: hand the channel to a dedicated player window in full-screen
+    /// mode. The embedded player stops first so a single-connection plan isn't
+    /// used twice, and resumes when that window closes.
+    private func openFullScreenPlayer() {
+        guard let channel = currentChannel, let item = coordinator.session.makeLiveItem(channel) else { return }
+        playerVC?.suspendPlayback()
+        let wc = PlayerWindowController.present(session: coordinator.session, item: item)
+        wc.onClosed = { [weak self] in self?.playerVC?.resumePlayback() }
+        if wc.window?.styleMask.contains(.fullScreen) == false { wc.window?.toggleFullScreen(nil) }
     }
 
     private func loadEPG(for channel: LiveStream) {

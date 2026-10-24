@@ -10,6 +10,23 @@ credentials, and a self‑contained app bundle.
 
 ---
 
+## What's new in 1.2.1 — Playback fixes
+
+- **Live TV video is full size again.** A layout bug (the ★ favorite button
+  under the video was missing `translatesAutoresizingMaskIntoConstraints =
+  false`) squeezed the whole video panel to 20 pt and stopped the window from
+  growing in full screen. The video now fills all available space at any
+  window size, and the channel list narrows slightly on small windows.
+- **Live TV full screen** opens the channel in a dedicated full-screen player
+  window (button or `F`); the embedded player resumes when you close it.
+- **Movies no longer close mid-film.** When a provider drops the connection and
+  refuses the reconnect (expired VOD token / connection limit), libVLC reports
+  "ended" — the player used to treat that as the movie finishing and closed.
+  It now checks the position against the length and reconnects, resuming where
+  it stopped (up to 5 tries with back-off), and shows a clear error with
+  **Retry** if the stream really can't continue. Live channels reconnect too.
+- Un-minimizing a player window resumes playback instead of leaving it black.
+
 ## What's new in 1.2 — Offline downloads
 
 - **Download This Video Offline**: a button in the player's top bar (and on
